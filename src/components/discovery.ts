@@ -3,16 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// helpers for generating the
-// objects that Octant can render to components.
+// helpers for generating the objects that Octant can render to components.
 import * as h from "@project-octant/plugin/helpers";
 
 import ctx from "../context";
-import { V1ObjectMeta, V1ObjectReference } from "@kubernetes/client-node"
-import { Component } from "@project-octant/plugin/components/component"
-import { ComponentFactory, FactoryMetadata } from "@project-octant/plugin/components/component-factory"
-import { TextFactory } from "@project-octant/plugin/components/text";
+import { V1CustomResourceDefinition, V1CustomResourceDefinitionVersion, V1ObjectMeta, V1ObjectReference } from "@kubernetes/client-node";
+import { Component } from "@project-octant/plugin/components/component";
+import { ComponentFactory, FactoryMetadata } from "@project-octant/plugin/components/component-factory";
 import { LinkFactory } from "@project-octant/plugin/components/link";
+import { TextFactory } from "@project-octant/plugin/components/text";
 
 export const DiscoveryV1Alpha = "discovery.knative.dev/v1alpha1"
 
@@ -64,7 +63,7 @@ export class ClusterDuckTypeTableFactory implements ComponentFactory<any> {
     const { versions } = spec
     const columns = {
       type: 'Type',
-      version: 'API Version',
+      version: 'Stored API Version',
     }
     const table = new h.TableFactoryBuilder([], [], void 0, void 0, void 0, void 0, this.factoryMetadata);
     table.columns = [
@@ -74,11 +73,17 @@ export class ClusterDuckTypeTableFactory implements ComponentFactory<any> {
 
     table.emptyContent = `There are no ${spec.names.plural}!`;
     // TODO: this should be handled externally
-    const duckVersions = versions.reduce((acc: ResourceMeta[], cur) => acc.concat(status.ducks[cur.name]), [])
-    const latestVersions = latestDuckTypeVersions(duckVersions)
-    latestVersions.sort((a, b) => a.kind.localeCompare(b.kind))
+    const duckMetas = versions.reduce((acc: ResourceMeta[], cur) => acc.concat(status.ducks[cur.name]), [])
+    const stored = StoredVersions(duckMetas)
 
-    for (const duck of latestVersions) {
+    const storedMetas = stored.reduce((acc: ResourceMeta[], cur) => {
+      const storedMeta = duckMetas.find(meta => meta.kind === cur[0] && meta.apiVersion.endsWith(cur[1].name))
+      return storedMeta ? acc.concat(storedMeta) : acc
+    }, [])
+    // const latestVersions = latestDuckTypeVersions(duckVersions)
+    storedMetas.sort((a, b) => a.kind.localeCompare(b.kind))
+
+    for (const duck of storedMetas) {
       const { apiVersion, kind } = duck
       // TODO consider using the builtin octant CRD to link to
       const ref: V1ObjectReference = { apiVersion: this.ref?.apiVersion, name: kind }
@@ -98,10 +103,37 @@ export class ClusterDuckTypeTableFactory implements ComponentFactory<any> {
   }
 }
 
+export function StoredVersions(sourceMetas: ResourceMeta[]): [string, V1CustomResourceDefinitionVersion][] {
+  const uniqueMetas: ResourceMeta[] = sourceMetas.filter(
+    (meta, idx, arr) => idx === arr.findIndex(first => meta.kind === first.kind))
+  const crdNames: string[] = uniqueMetas.map((meta) => {
+    const group: string = meta?.apiVersion.split("/")[0] || "nogroup"
+    // TODO: this is currently a guess and potentially risky
+    const plural: string = meta?.kind.toLocaleLowerCase() + 's' || "noname"
+
+    return `${plural}.${group}`
+  })
+
+  const crds: V1CustomResourceDefinition[] = crdNames.map((name) => ctx.dashboardClient.Get({
+    apiVersion: 'apiextensions.k8s.io/v1',
+    kind: 'CustomResourceDefinition',
+    name: `${name}`,
+  }))
+
+  const stored =  crds.reduce((acc: [string, V1CustomResourceDefinitionVersion][], cur) => {
+    const kind = cur.status?.acceptedNames?.kind
+    const version = cur.spec.versions.find(ver => ver.storage)
+
+    if (kind && version) { acc.push([kind, version])}
+    return acc
+  }, [])
+  return stored
+}
+
 function latestDuckTypeVersions(duckVersions: ResourceMeta[]): ResourceMeta[] {
-    duckVersions.sort((a, b) => apiVersionCompare(a.apiVersion, b.apiVersion))
-    duckVersions.reverse()
-    return duckVersions.filter((val, idx, arr) => idx === arr.findIndex(v => val.kind === v.kind))
+  duckVersions.sort((a, b) => apiVersionCompare(a.apiVersion, b.apiVersion))
+  duckVersions.reverse()
+  return duckVersions.filter((val, idx, arr) => idx === arr.findIndex(v => val.kind === v.kind))
 }
 
 function apiVersionCompare(a: string, b: string): number {

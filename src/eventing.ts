@@ -29,6 +29,7 @@ import {
   DiscoveryV1AlphaClusterDuckType,
   ResourceMeta,
   SourcesDuck,
+  StoredVersions,
 } from "./components/discovery";
 import { MetadataSummaryFactory } from "./components/metadata";
 import { EditorFactory } from "@project-octant/plugin/components/editor";
@@ -248,20 +249,17 @@ function sourceListing(factoryMetadata?: FactoryMetadata, sourceType?: string): 
     [])
   sourceMetas.sort((a, b) => (a.kind.localeCompare(b.kind)))
 
-  const allSources: Source[] = sourceMetas.reduce((acc: Source[], cur) => {
-    if (!sourceType || cur.kind === sourceType) {
-      return acc.concat(ctx.dashboardClient.List({
-        apiVersion: cur.apiVersion,
-        kind: cur.kind,
-        namespace: ctx.namespace,
-      }))
-    }
-    return acc
+  const stored = StoredVersions(sourceMetas)
+  const storedMetas: ResourceMeta[] = stored.reduce((acc: ResourceMeta[], cur) => {
+    const storedMeta = sourceMetas.find(meta => meta.kind === cur[0] && meta.apiVersion.endsWith(cur[1].name))
+    return storedMeta ? acc.concat(storedMeta) : acc
   }, [])
 
-  const sources: Source[] = allSources.reduce((acc: Source[], cur) =>
-    acc.find((s) => s.metadata.uid === cur.metadata.uid) ? acc : acc.concat(cur),
-    [])
+  const sources: Source[] = storedMetas.reduce((acc: Source[], cur) => acc.concat(ctx.dashboardClient.List({
+    apiVersion: cur.apiVersion,
+    kind: cur.kind,
+    namespace: ctx.namespace,
+  })), [])
   sources.sort((a, b) => (a.metadata.name || '').localeCompare(b.metadata.name || ''));
 
   return new SourceListFactory({ sources, factoryMetadata })
