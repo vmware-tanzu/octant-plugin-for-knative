@@ -25,7 +25,7 @@ jobs:
     - name: Build
       run: npm run plugin:prod
     - name: Upload build
-      uses: actions/upload-artifact@v2.2.2
+      uses: actions/upload-artifact@v2.2.4
       with:
         name: knative.js
         path: ./dist/knative.js
