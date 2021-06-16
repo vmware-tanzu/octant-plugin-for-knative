@@ -50,7 +50,7 @@ jobs:
         release_name: Release ${{ github.ref }}
         draft: true
     - name: Download staged build
-      uses: actions/download-artifact@v2.0.8
+      uses: actions/download-artifact@v2.0.10
       with:
         name: knative.js
     - name: Upload release
